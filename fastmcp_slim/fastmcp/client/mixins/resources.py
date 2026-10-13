@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlsplit
 
 import mcp_types
 from mcp.client.caching import CacheMode
-from pydantic import AnyUrl
+from pydantic import AnyUrl, ValidationError
 
 if TYPE_CHECKING:
     from fastmcp.client.client import Client
@@ -229,10 +230,18 @@ class ClientResourcesMixin:
             RuntimeError: If called while the client is not connected.
             MCPError: If the request results in a TimeoutError | JSONRPCError
         """
-        # SDK v2: the wire `uri` is a plain string, but resources are stored
-        # under the AnyUrl-normalized form (e.g. a trailing slash for authority
-        # URIs), so normalize through AnyUrl to keep server-side lookups aligned.
-        uri_str = str(AnyUrl(uri)) if isinstance(uri, str) else str(uri)
+        if isinstance(uri, str):
+            normalized_uri = AnyUrl(uri)
+            # AnyUrl collapses a leading empty file path segment. Namespace
+            # routing needs that segment to recover the child's original URI.
+            # Keep existing normalization for other inputs (authority aliases,
+            # percent-encoding, etc.), including reads through proxy providers.
+            if normalized_uri.scheme == "file" and urlsplit(uri).path.startswith("//"):
+                uri_str = uri
+            else:
+                uri_str = str(normalized_uri)
+        else:
+            uri_str = str(uri)
         with client_span(
             "resources/read",
             "resources/read",
@@ -296,8 +305,8 @@ class ClientResourcesMixin:
 
         if isinstance(uri, str):
             try:
-                uri = AnyUrl(uri)  # Ensure AnyUrl
-            except Exception as e:
+                AnyUrl(uri)  # Validate without replacing the advertised URI.
+            except ValidationError as e:
                 raise ValueError(
                     f"Provided resource URI is invalid: {str(uri)!r}"
                 ) from e
