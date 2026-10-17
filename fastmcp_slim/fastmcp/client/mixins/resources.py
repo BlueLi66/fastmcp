@@ -232,14 +232,16 @@ class ClientResourcesMixin:
         """
         if isinstance(uri, str):
             normalized_uri = AnyUrl(uri)
+            uri_str = str(normalized_uri)
             # AnyUrl collapses a leading empty file path segment. Namespace
             # routing needs that segment to recover the child's original URI.
             # Keep existing normalization for other inputs (authority aliases,
             # percent-encoding, etc.), including reads through proxy providers.
-            if normalized_uri.scheme == "file" and urlsplit(uri).path.startswith("//"):
-                uri_str = uri
-            else:
-                uri_str = str(normalized_uri)
+            # Empty-authority file URIs still need their normal alias handling.
+            if normalized_uri.scheme == "file":
+                parsed_uri = urlsplit(uri)
+                if parsed_uri.netloc and parsed_uri.path.startswith("//"):
+                    uri_str = uri
         else:
             uri_str = str(uri)
         with client_span(
